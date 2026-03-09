@@ -1,0 +1,8 @@
+[
+  { "id": 1, "question": "Next.jsとは何ですか？", "answer": "本番環境向けのReactフレームワークです。" },
+  { "id": 2, "question": "SSGとは何の略ですか？", "answer": "Static Site Generation (静的サイト生成) の略です。" },
+  { "id": 3, "question": "Next.jsのデプロイ先として一般的なものは？", "answer": "Vercel、自社VPS(PM2やDocker使用)などになります。" },
+  { "id": 4, "question": "basePath の役割は何ですか？", "answer": "ドメインのサブディレクトリ(例: /anki)でアプリを公開する際にNext.jsにパスを認識させる設定です。" },
+  { "id": 5, "question": "useEffectは何に使いますか？", "answer": "コンポーネントのレンダリング後に副作用（データフェッチなど）を実行するためです。" },
+  { "id": 6, "question": "VPS環境でNext.jsアプリを永続化するツールは？", "answer": "PM2 などのプロセスマネージャーです。" }
+]
