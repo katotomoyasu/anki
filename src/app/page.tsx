@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import Image from "next/image";
 import Link from "next/link";
 
 interface Flashcard {
@@ -655,7 +654,7 @@ export default function AnkiApp() {
                 </span>
               </div>
               <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-sm flex flex-col border-l-4 border-l-amber-500">
-                <span className="text-zinc-500 dark:text-zinc-400 text-sm font-medium mb-1">Mature (>21d)</span>
+                <span className="text-zinc-500 dark:text-zinc-400 text-sm font-medium mb-1">Mature (&gt;21d)</span>
                 <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">
                   {filteredCards.filter(c => (c.interval || 0) > 21).length}
                 </span>
