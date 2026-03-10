@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -8,11 +8,15 @@ interface Flashcard {
   id: number;
   question: string;
   answer: string;
+  category?: string; // カテゴリ追加
 }
 
 export default function AnkiApp() {
   const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // 現在のカテゴリとカードのインデックス
+  const [activeCategory, setActiveCategory] = useState<string>("すべて");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [viewMode, setViewMode] = useState<"study" | "list" | "add">("study");
@@ -20,6 +24,7 @@ export default function AnkiApp() {
   // New Card State
   const [newQuestion, setNewQuestion] = useState("");
   const [newAnswer, setNewAnswer] = useState("");
+  const [newCategory, setNewCategory] = useState("");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -37,6 +42,7 @@ export default function AnkiApp() {
         const res = await fetch('/anki/data.json');
         if (res.ok) {
           const data = await res.json();
+          // 古いデータにはcategoryがないかもしれないため補完は不要だが、UI表示時に"未分類"として扱う
           setFlashcards(data);
           localStorage.setItem("anki_flashcards", JSON.stringify(data));
         }
@@ -56,17 +62,35 @@ export default function AnkiApp() {
     }
   }, [flashcards, isLoading]);
 
+  // カテゴリ一覧の抽出と、現在選択中のカテゴリによる絞り込み
+  const categories = useMemo(() => {
+    const cats = flashcards.map(c => c.category || "未分類");
+    return ["すべて", ...Array.from(new Set(cats))];
+  }, [flashcards]);
+
+  const filteredCards = useMemo(() => {
+    if (activeCategory === "すべて") return flashcards;
+    return flashcards.filter(c => (c.category || "未分類") === activeCategory);
+  }, [flashcards, activeCategory]);
+
+  // カテゴリ変更時にインデックスをリセットする
+  const handleCategoryChange = (cat: string) => {
+    setActiveCategory(cat);
+    setCurrentIndex(0);
+    setIsFlipped(false);
+  };
+
   const nextCard = () => {
     setIsFlipped(false);
     setTimeout(() => {
-      setCurrentIndex((prev: number) => (prev + 1) % (flashcards.length || 1));
+      setCurrentIndex((prev) => (prev + 1) % (filteredCards.length || 1));
     }, 150);
   };
 
   const prevCard = () => {
     setIsFlipped(false);
     setTimeout(() => {
-      setCurrentIndex((prev: number) => (prev - 1 + flashcards.length) % (flashcards.length || 1));
+      setCurrentIndex((prev) => (prev - 1 + filteredCards.length) % (filteredCards.length || 1));
     }, 150);
   };
 
@@ -87,11 +111,13 @@ export default function AnkiApp() {
       id: Date.now(),
       question: newQuestion,
       answer: newAnswer,
+      category: newCategory.trim() || "未分類"
     };
     
     setFlashcards([...flashcards, newCard]);
     setNewQuestion("");
     setNewAnswer("");
+    // 連続追加しやすいようにカテゴリはそのまま残す
     alert("問題を登録しました！");
   };
 
@@ -99,8 +125,14 @@ export default function AnkiApp() {
     if (confirm("この問題を削除してもよろしいですか？")) {
       const updated = flashcards.filter(c => c.id !== id);
       setFlashcards(updated);
-      if (currentIndex >= updated.length) {
-        setCurrentIndex(Math.max(0, updated.length - 1));
+      
+      // もし現在の表示カード枚数が減ってインデックスがはみ出したら調整
+      const newFilteredCount = activeCategory === "すべて" 
+        ? updated.length 
+        : updated.filter(c => (c.category || "未分類") === activeCategory).length;
+        
+      if (currentIndex >= newFilteredCount) {
+        setCurrentIndex(Math.max(0, newFilteredCount - 1));
       }
     }
   };
@@ -127,12 +159,27 @@ export default function AnkiApp() {
       try {
         const imported = JSON.parse(event.target?.result as string);
         if (Array.isArray(imported)) {
-          setFlashcards(imported);
+          // NotebookLMなどから持ってくる時にカテゴリ情報を保証する
+          const validated = imported.map((item: any, i) => ({
+            id: item.id || Date.now() + i,
+            question: item.question || "No Question",
+            answer: item.answer || "No Answer",
+            category: item.category || "未分類",
+          }));
+          
+          if (confirm(`既存のデータを上書きして ${validated.length} 件のデータを読み込みますか？\n(キャンセルすると既存のデータに追加マージします)`)) {
+            setFlashcards(validated);
+          } else {
+            // 末尾にマージ
+            setFlashcards([...flashcards, ...validated]);
+          }
+
           setCurrentIndex(0);
+          setActiveCategory("すべて");
           setViewMode("list");
           alert("データを読み込みました！");
         } else {
-          alert("JSONの形式が正しくありません。配列形式である必要があります。");
+          alert("JSONの形式が正しくありません。配列形式のデータが必要です。");
         }
       } catch (err) {
         alert("JSONの解析に失敗しました。ファイルを確認してください。");
@@ -200,7 +247,7 @@ export default function AnkiApp() {
                 : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
             }`}
           >
-            Study Mode
+            📚 Study Mode
           </button>
           <button
             onClick={() => setViewMode("list")}
@@ -210,7 +257,7 @@ export default function AnkiApp() {
                 : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
             }`}
           >
-            List View
+            📝 List View
           </button>
           <button
             onClick={() => setViewMode("add")}
@@ -224,6 +271,25 @@ export default function AnkiApp() {
           </button>
         </div>
 
+        {/* Categories (only show in list or study mode) */}
+        {(viewMode === "list" || viewMode === "study") && (
+          <div className="flex w-full overflow-x-auto pb-2 gap-2 hide-scrollbar mask-edges">
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => handleCategoryChange(cat)}
+                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-medium transition-colors border ${
+                  activeCategory === cat
+                    ? "bg-indigo-100 border-indigo-200 text-indigo-700 dark:bg-indigo-900/40 dark:border-indigo-800 dark:text-indigo-200"
+                    : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Add Card Mode */}
         {viewMode === "add" && (
           <div className="w-full mt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -231,6 +297,24 @@ export default function AnkiApp() {
               <h2 className="text-xl font-bold text-zinc-800 dark:text-zinc-100 mb-6">新しい問題を登録</h2>
               
               <div className="flex flex-col gap-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    カテゴリ (Category)
+                  </label>
+                  <input
+                    type="text"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    list="category-suggestions"
+                    className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    placeholder="例: 統計学、日本語教師 など (空欄で未分類)"
+                  />
+                  <datalist id="category-suggestions">
+                    {categories.filter(c => c !== "すべて").map(c => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                     問題 (Question)
@@ -241,7 +325,7 @@ export default function AnkiApp() {
                     onChange={(e) => setNewQuestion(e.target.value)}
                     className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
                     rows={3}
-                    placeholder="例: Next.jsの特徴は何ですか？"
+                    placeholder="例: 標準偏差とは何ですか？"
                   />
                 </div>
                 <div>
@@ -254,7 +338,7 @@ export default function AnkiApp() {
                     onChange={(e) => setNewAnswer(e.target.value)}
                     className="w-full px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
                     rows={4}
-                    placeholder="例: サーバーサイドレンダリングや静的サイト生成が可能なReactフレームワークです。"
+                    placeholder="例: データのばらつきの大きさを表す指標です。"
                   />
                 </div>
               </div>
@@ -271,12 +355,13 @@ export default function AnkiApp() {
 
         {/* List View */}
         {viewMode === "list" && (
-          <div className="w-full mt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {flashcards.length === 0 ? (
-              <p className="text-center text-zinc-500 py-10">問題がありません。「+ Add Card」から登録してください。</p>
+          <div className="w-full flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {filteredCards.length === 0 ? (
+              <p className="text-center text-zinc-500 py-10">問題が見つかりません。「+ Add Card」から登録してください。</p>
             ) : (
               <div className="grid gap-4">
-                {flashcards.map((card, idx) => (
+                <p className="text-right text-sm text-zinc-500 font-medium">全 {filteredCards.length} 件</p>
+                {filteredCards.map((card, idx) => (
                   <div key={card.id} className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow group">
                     <button 
                       onClick={() => handleDeleteCard(card.id)}
@@ -285,11 +370,18 @@ export default function AnkiApp() {
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                     </button>
-                    <div className="flex items-center gap-3 mb-3 pr-8">
-                      <span className="flex items-center justify-center min-w-[24px] h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs font-bold px-2">
+                    
+                    <div className="mb-2">
+                      <span className="inline-block px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-semibold rounded">
+                        {card.category || "未分類"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-start gap-3 mb-3 pr-8">
+                      <span className="flex items-center justify-center min-w-[24px] h-6 mt-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs font-bold px-2">
                         {idx + 1}
                       </span>
-                      <h3 className="font-semibold text-zinc-800 dark:text-zinc-100 text-lg">
+                      <h3 className="font-semibold text-zinc-800 dark:text-zinc-100 text-lg leading-tight mt-0.5">
                         {card.question}
                       </h3>
                     </div>
@@ -306,12 +398,13 @@ export default function AnkiApp() {
 
         {/* Study Mode (Flashcard) */}
         {viewMode === "study" && (
-          <div className="w-full flex flex-col items-center gap-8 animate-in fade-in zoom-in-95 duration-500">
-            {flashcards.length === 0 ? (
-              <p className="text-center text-zinc-500 py-10 mt-10">問題がありません。「+ Add Card」から登録してください。</p>
+          <div className="w-full flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-500">
+            {filteredCards.length === 0 ? (
+              <p className="text-center text-zinc-500 py-10 mt-10">問題が見つかりません。「+ Add Card」から登録してください。</p>
             ) : (
               <>
                 <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">
+                  {activeCategory !== "すべて" && <span className="text-indigo-600 dark:text-indigo-400 font-bold mr-2">[{activeCategory}]</span>}
                   カードをタップすると答えが表示されます。
                 </p>
 
@@ -323,9 +416,12 @@ export default function AnkiApp() {
                     }`}
                   >
                     {/* Front */}
-                    <div className="absolute inset-0 backface-hidden flex items-center justify-center rounded-2xl bg-white dark:bg-zinc-900 shadow-xl border border-zinc-200 dark:border-zinc-800 p-8 sm:p-12">
-                      <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-zinc-800 dark:text-zinc-100 text-center leading-relaxed whitespace-pre-wrap">
-                        {flashcards[currentIndex]?.question}
+                    <div className="absolute inset-0 backface-hidden flex flex-col items-center justify-center rounded-2xl bg-white dark:bg-zinc-900 shadow-xl border border-zinc-200 dark:border-zinc-800 p-8 sm:p-12">
+                      <div className="absolute top-6 left-6 px-3 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-xs font-semibold rounded">
+                        {filteredCards[currentIndex]?.category || "未分類"}
+                      </div>
+                      <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-zinc-800 dark:text-zinc-100 text-center leading-relaxed whitespace-pre-wrap mt-4">
+                        {filteredCards[currentIndex]?.question}
                       </h2>
                       <div className="absolute bottom-6 text-sm text-zinc-400 font-medium">
                         Tap to flip
@@ -335,7 +431,7 @@ export default function AnkiApp() {
                     {/* Back */}
                     <div className="absolute inset-0 backface-hidden rotate-y-180 flex items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/20 shadow-xl border border-indigo-200 dark:border-indigo-800 p-8 sm:p-12 overflow-y-auto">
                       <p className="text-xl sm:text-2xl lg:text-3xl font-medium text-indigo-900 dark:text-indigo-200 text-center leading-relaxed whitespace-pre-wrap">
-                        {flashcards[currentIndex]?.answer}
+                        {filteredCards[currentIndex]?.answer}
                       </p>
                     </div>
                   </div>
@@ -350,8 +446,8 @@ export default function AnkiApp() {
                     ← Prev
                   </button>
                   
-                  <div className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 bg-white dark:bg-zinc-800 px-4 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700">
-                    {currentIndex + 1} / {flashcards.length}
+                  <div className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 bg-white dark:bg-zinc-800 px-4 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                    {currentIndex + 1} / {filteredCards.length}
                   </div>
 
                   <button
@@ -365,7 +461,7 @@ export default function AnkiApp() {
                 <div className="flex gap-4">
                   <button 
                     onClick={toggleReset}
-                    className="mt-4 text-sm text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 underline underline-offset-4 decoration-zinc-300 dark:decoration-zinc-700"
+                    className="mt-2 text-sm text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 underline underline-offset-4 decoration-zinc-300 dark:decoration-zinc-700"
                   >
                     最初に戻る
                   </button>
